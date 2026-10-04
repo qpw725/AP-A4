@@ -28,6 +28,13 @@ runEval = runEval' envEmpty stateInitial
     runEval' r s m =
       let (_, ps, res) = runEvalState r s m
        in (ps, res)
+    runEval' r s (Free (KvGetOp key k)) = 
+      case lookup key s of
+        Just val ->  runEval' r s $ k val
+        Nothing -> ([], Left "value not in evironment")
+    runEval' r s (Free (KvPutOp key val m)) = 
+      let s' = (key, val) : filter (\(k, _) -> k /= key) s in
+        runEval' r s' m
 
     -- Return the final state internally so an enclosing transaction can
     -- choose whether to commit it. The public result stays unchanged.
