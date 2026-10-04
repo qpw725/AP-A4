@@ -78,3 +78,17 @@ runEvalIO evalm = do
             Left e ->
               pure $ Left e
     runEvalIO' _ _ (Free (ErrorOp e)) = pure $ Left e
+    runEvalIO' r db (Free (TransactionOp m k)) = do
+      result <- withTempDB $ \tempDB -> do
+        -- db may itself be a temporary database for an outer transaction.
+        copyDB db tempDB
+        result <- runEvalIO' r tempDB m
+        case result of
+          Left e -> pure $ Left e
+          Right val -> do
+            copyDB tempDB db
+            pure $ Right val
+      -- withTempDB has cleaned up before execution continues outside the block.
+      case result of
+        Left e -> pure $ Left e
+        Right val -> runEvalIO' r db $ k val
