@@ -92,3 +92,24 @@ runEvalIO evalm = do
       case result of
         Left e -> pure $ Left e
         Right val -> runEvalIO' r db $ k val
+    runEvalIO' r db (Free (KvGetOp key k)) = do
+      file <- readDB db
+      case file of
+        Right file' ->
+          case lookup key file' of
+            Just val ->  runEvalIO' r db $ k val
+            Nothing -> --pure $ Left "value not in evironment"
+              do
+                input <- prompt ("Invalid key: " ++ show key ++ ". Enter a replacement: ")
+                case readVal input of
+                  Just newval -> runEvalIO' r db (k newval)
+                  Nothing -> pure $ Left $ "Invalid key: " ++ input
+        Left e -> pure $ Left e
+
+    runEvalIO' r db (Free (KvPutOp key val m)) = do
+      file <- readDB db
+      case file of
+        Right file' ->
+          let s' = (key, val) : filter (\(k, _) -> k /= key) file' in
+          writeDB db s' *> runEvalIO' r db  m
+        Left e -> pure $ Left e
