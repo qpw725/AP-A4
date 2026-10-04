@@ -140,7 +140,24 @@ pureTests =
                 evalPrint "catch"
                 pure $ ValInt 2)
           )
-          @?= ([], Right (ValInt 1))
+          @?= ([], Right (ValInt 1)),
+      --
+      testCase "KvPut and KvGet" $
+        runEval
+          ( do
+              evalKvPut (ValInt 0) (ValInt 42)
+              evalKvGet (ValInt 0)
+          )
+          @?= ([], Right (ValInt 42)),
+      --
+      testCase "KvPut overwrite" $
+        runEval
+          ( do
+              evalKvPut (ValInt 0) (ValInt 1)
+              evalKvPut (ValInt 0) (ValInt 2)
+              evalKvGet (ValInt 0)
+          )
+          @?= ([], Right (ValInt 2))
     ]
 
 ioTests :: TestTree
@@ -225,7 +242,48 @@ ioTests =
                 ValInt x -> pure $ ValInt (x + 1)
                 _ -> failure "Error - not an Integer"
 
-          res @?= Right (ValInt 6) 
+          res @?= Right (ValInt 6) ,
+        --
+        testCase "KvPut and KvGet (IO)" $ do
+        (out, res) <-
+          captureIO [] $
+            runEvalIO $ do
+              evalKvPut (ValInt 0) (ValInt 10)
+              evalKvGet (ValInt 0)
+        (out, res) @?= ([], Right (ValInt 10)),
+      --
+        testCase "KvPut overwrite (IO)" $ do
+          (out, res) <-
+            captureIO [] $
+              runEvalIO $ do
+                evalKvPut (ValInt 1) (ValBool False)
+                evalKvPut (ValInt 1) (ValBool True)
+                evalKvGet (ValInt 1)
+          (out, res) @?= ([], Right (ValBool True)),
+        --
+        testCase "Missing key prompt (Valid ValInt)" $ do
+          (out, res) <-
+            captureIO ["ValInt 5"] $
+              runEvalIO $
+                evalKvGet (ValInt 0)
+          out @?= ["Invalid key: ValInt 0. Enter a replacement: "]
+          res @?= Right (ValInt 5),
+        --
+        testCase "Missing key prompt (Valid ValBool)" $ do
+          (out, res) <-
+            captureIO ["ValBool True"] $
+              runEvalIO $
+                evalKvGet (ValInt 99)
+          out @?= ["Invalid key: ValInt 99. Enter a replacement: "]
+          res @?= Right (ValBool True),
+        --
+        testCase "Missing key prompt (Invalid input string)" $ do
+          (out, res) <-
+            captureIO ["lol"] $
+              runEvalIO $
+                evalKvGet (ValInt 0)
+          out @?= ["Invalid key: ValInt 0. Enter a replacement: "]
+          res @?= Left "Invalid value input: lol"
     ]
 
 -- Task 3 examples that do not need the Task 1 or Task 2 implementations.
