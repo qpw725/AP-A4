@@ -283,7 +283,7 @@ ioTests =
               runEvalIO $
                 evalKvGet (ValInt 0)
           out @?= ["Invalid key: ValInt 0. Enter a replacement: "]
-          res @?= Left "Invalid value input: lol"
+          res @?= Left "Invalid key: lol"
     ]
 
 -- Task 3 examples that do not need the Task 1 or Task 2 implementations.

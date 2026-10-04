@@ -25,9 +25,6 @@ runEval = runEval' envEmpty stateInitial
               in (ps1 ++ ps2 ++ ps3, res3)
             Left e -> (ps1 ++ ps2, Left e)
     runEval' _ _ (Free (ErrorOp e)) = ([], Left e)
-    runEval' r s m =
-      let (_, ps, res) = runEvalState r s m
-       in (ps, res)
     runEval' r s (Free (KvGetOp key k)) = 
       case lookup key s of
         Just val ->  runEval' r s $ k val
@@ -35,6 +32,10 @@ runEval = runEval' envEmpty stateInitial
     runEval' r s (Free (KvPutOp key val m)) = 
       let s' = (key, val) : filter (\(k, _) -> k /= key) s in
         runEval' r s' m
+    runEval' r s m =
+      let (_, ps, res) = runEvalState r s m
+       in (ps, res)
+
 
     -- Return the final state internally so an enclosing transaction can
     -- choose whether to commit it. The public result stays unchanged.
