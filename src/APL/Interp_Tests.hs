@@ -5,7 +5,13 @@ import APL.Eval (eval)
 import APL.InterpIO (runEvalIO)
 import APL.InterpPure (runEval)
 import APL.Monad
-import APL.Util (captureIO)
+import qualified APL.Util as Util (captureIO)
+import Control.Concurrent (threadDelay)
+import Control.Exception (bracket)
+import GHC.IO.Handle (hDuplicate, hDuplicateTo)
+import System.Directory (removeFile)
+import System.Info (os)
+import System.IO (SeekMode (AbsoluteSeek), hClose, hFlush, hGetContents', hPutStr, hSeek, openTempFile, stdin, stdout)
 import Test.Tasty (TestTree, testGroup)
 import Test.Tasty.HUnit (testCase, (@?=))
 
@@ -17,6 +23,41 @@ evalIO' = runEvalIO . eval
 
 tests :: TestTree
 tests = testGroup "Free monad interpreters" [pureTests, ioTests, transactionTests]
+
+-- Windows cannot duplicate the supplied helper's pipe handles onto stdin/stdout.
+-- Use ordinary temporary files there, keeping the same input/output assertions.
+captureIO :: [String] -> IO a -> IO ([String], a)
+captureIO inputs action
+  | os /= "mingw32" = Util.captureIO inputs action
+  | otherwise =
+      withTemp "apl-input" $ \input ->
+        withTemp "apl-output" $ \output -> do
+          hPutStr input $ unlines inputs
+          hSeek input AbsoluteSeek 0
+          threadDelay 50000 -- Let the test runner finish printing its test label.
+          hFlush stdout
+          bracket
+            ((,) <$> hDuplicate stdin <*> hDuplicate stdout)
+            ( \(savedIn, savedOut) -> do
+                hFlush stdout
+                hDuplicateTo savedIn stdin
+                hDuplicateTo savedOut stdout
+                mapM_ hClose [savedIn, savedOut]
+            )
+            ( \_ -> do
+                hDuplicateTo input stdin
+                hDuplicateTo output stdout
+                result <- action
+                hFlush stdout
+                hSeek output AbsoluteSeek 0
+                outputText <- hGetContents' output
+                pure (lines outputText, result)
+            )
+  where
+    withTemp name use =
+      bracket (openTempFile "." name)
+        (\(path, handle) -> hClose handle >> removeFile path)
+        (\(_, handle) -> use handle)
 
 pureTests :: TestTree
 pureTests =
@@ -286,7 +327,7 @@ ioTests =
           res @?= Left "Invalid value input: lol"
     ]
 
--- Task 3 examples that do not need the Task 1 or Task 2 implementations.
+-- Task 3 examples, including integration with try/catch and key-value storage.
 transactionTests :: TestTree
 transactionTests =
   testGroup
@@ -297,15 +338,46 @@ transactionTests =
       check "Failure keeps printed output and propagates the error"
         (transaction $ evalPrint "hello" >> failure "abort")
         (["hello"], Left "abort"),
-      check "Nested success returns the inner value"
-        (transaction $ transaction $ pure $ ValInt 7)
+      check "Nested success commits through try/catch"
+        ( do
+            _ <- transaction (transaction (evalKvPut (ValInt 0) (ValInt 7) >> pure (ValInt 7)))
+              `catch` failure "unexpected failure"
+            evalKvGet (ValInt 0)
+        )
         ([], Right $ ValInt 7),
       check "Nested failure keeps output from both levels"
         ( transaction $ do
             evalPrint "outer"
             transaction $ evalPrint "inner" >> failure "abort"
         )
-        (["outer", "inner"], Left "abort")
+        (["outer", "inner"], Left "abort"),
+      check "Rollback restores the old value"
+        ( do
+            evalKvPut (ValInt 0) (ValInt 10)
+            transaction (evalKvPut (ValInt 0) (ValInt 20) >> failure "abort")
+              `catch` evalKvGet (ValInt 0)
+        )
+        ([], Right $ ValInt 10),
+      check "Caught inner failure preserves outer writes"
+        ( do
+            _ <- transaction $ do
+              evalKvPut (ValInt 0) (ValInt 1)
+              transaction (evalKvPut (ValInt 0) (ValInt 2) >> failure "inner")
+                `catch` pure (ValBool True)
+            evalKvGet (ValInt 0)
+        )
+        ([], Right $ ValInt 1),
+      check "Outer failure rolls back an inner success"
+        ( do
+            evalKvPut (ValInt 0) (ValInt 10)
+            transaction
+              ( do
+                  _ <- transaction $ evalKvPut (ValInt 0) (ValInt 20) >> pure (ValInt 20)
+                  failure "outer"
+              )
+              `catch` evalKvGet (ValInt 0)
+        )
+        ([], Right $ ValInt 10)
     ]
   where
     check :: String -> EvalM Val -> ([String], Either Error Val) -> TestTree
