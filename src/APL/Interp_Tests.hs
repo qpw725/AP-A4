@@ -24,8 +24,6 @@ evalIO' = runEvalIO . eval
 tests :: TestTree
 tests = testGroup "Free monad interpreters" [pureTests, ioTests, transactionTests]
 
--- Windows cannot duplicate the supplied helper's pipe handles onto stdin/stdout.
--- Use ordinary temporary files there, keeping the same input/output assertions.
 captureIO :: [String] -> IO a -> IO ([String], a)
 captureIO inputs action
   | os /= "mingw32" = Util.captureIO inputs action
@@ -34,7 +32,7 @@ captureIO inputs action
         withTemp "apl-output" $ \output -> do
           hPutStr input $ unlines inputs
           hSeek input AbsoluteSeek 0
-          threadDelay 50000 -- Let the test runner finish printing its test label.
+          threadDelay 50000
           hFlush stdout
           bracket
             ((,) <$> hDuplicate stdin <*> hDuplicate stdout)
@@ -327,7 +325,6 @@ ioTests =
           res @?= Left "Invalid value input: lol"
     ]
 
--- Task 3 examples, including integration with try/catch and key-value storage.
 transactionTests :: TestTree
 transactionTests =
   testGroup
