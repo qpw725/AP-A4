@@ -16,7 +16,7 @@ evalIO' :: Exp -> IO (Either Error Val)
 evalIO' = runEvalIO . eval
 
 tests :: TestTree
-tests = testGroup "Free monad interpreters" [pureTests, ioTests]
+tests = testGroup "Free monad interpreters" [pureTests, ioTests, transactionTests]
 
 pureTests :: TestTree
 pureTests =
@@ -84,3 +84,34 @@ ioTests =
         --              CstInt 1
         --    (out, res) @?= (["This is 1: 1", "This is also 1: 1"], Right $ ValInt 1)
     ]
+
+-- Task 3 examples that do not need the Task 1 or Task 2 implementations.
+transactionTests :: TestTree
+transactionTests =
+  testGroup
+    "Transactions"
+    [ check "Result, continuation, and variable scope"
+        (eval $ Let "x" (CstInt 7) $ Add (Transaction $ Var "x") (CstInt 1))
+        ([], Right $ ValInt 8),
+      check "Failure keeps printed output and propagates the error"
+        (transaction $ evalPrint "hello" >> failure "abort")
+        (["hello"], Left "abort"),
+      check "Nested success returns the inner value"
+        (transaction $ transaction $ pure $ ValInt 7)
+        ([], Right $ ValInt 7),
+      check "Nested failure keeps output from both levels"
+        ( transaction $ do
+            evalPrint "outer"
+            transaction $ evalPrint "inner" >> failure "abort"
+        )
+        (["outer", "inner"], Left "abort")
+    ]
+  where
+    check :: String -> EvalM Val -> ([String], Either Error Val) -> TestTree
+    check name m expected =
+      testGroup name
+        [ testCase "Pure" $ runEval m @?= expected,
+          testCase "IO" $ do
+            actual <- captureIO [] $ runEvalIO m
+            actual @?= expected
+        ]

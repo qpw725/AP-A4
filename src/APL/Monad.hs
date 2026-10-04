@@ -73,11 +73,13 @@ data EvalOp a
   = ReadOp (Env -> a)
   | PrintOp String a
   | ErrorOp Error
+  | TransactionOp (EvalM Val) (Val -> a)
 
 instance Functor EvalOp where
   fmap f (ReadOp k) = ReadOp $ f . k
   fmap f (PrintOp p m) = PrintOp p $ f m
   fmap _ (ErrorOp e) = ErrorOp e
+  fmap f (TransactionOp m k) = TransactionOp m $ f . k
 
 type EvalM a = Free EvalOp a
 
@@ -96,7 +98,8 @@ localEnv :: (Env -> Env) -> EvalM a -> EvalM a
 localEnv f = modifyEffects g
   where
     g (ReadOp k) = ReadOp $ k . f
-    -- TODO: add cases for TryCatchOp, TransactionOp, and as necessary for the
+    g (TransactionOp m k) = TransactionOp (localEnv f m) k
+    -- TODO: add cases for TryCatchOp, and as necessary for the
     -- effects you add for looping.
     g op = op
 
@@ -116,7 +119,7 @@ evalKvPut :: Val -> Val -> EvalM ()
 evalKvPut = error "TODO"
 
 transaction :: EvalM Val -> EvalM Val
-transaction = error "TODO"
+transaction m = Free $ TransactionOp m pure
 
 -- | Enclose a computation @m@ such that if a 'breakLoop' is executed in @m@,
 -- execution will return here.
